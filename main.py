@@ -297,6 +297,8 @@ class WeeklyRAGRequest(BaseModel):
     history: List[DailyHistoryItem]
 
 class RAGTextItem(BaseModel):
+    category: str
+    priority_level: str
     title: str
     text: str
 
@@ -635,14 +637,20 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
         "  \"insight\": \"1 kalimat analisis mendalam tentang tren stres dan faktor dominan mahasiswa selama seminggu ini.\",\n"
         "  \"recommendations\": [\n"
         "    {\n"
+        "      \"category\": \"kategori rekomendasi (pilih salah satu dari: academic, health, lifestyle, sleep, social, mindfulness)\",\n"
+        "      \"priority_level\": \"tingkat prioritas (pilih salah satu dari: low, medium, high, urgent)\",\n"
         "      \"title\": \"Judul Rekomendasi 1 (Singkat, Tindakan)\",\n"
         "      \"text\": \"Tindakan konkret, praktis, dan personal untuk dilakukan.\"\n"
         "    },\n"
         "    {\n"
+        "      \"category\": \"kategori rekomendasi (pilih salah satu dari: academic, health, lifestyle, sleep, social, mindfulness)\",\n"
+        "      \"priority_level\": \"tingkat prioritas (pilih salah satu dari: low, medium, high, urgent)\",\n"
         "      \"title\": \"Judul Rekomendasi 2 (Singkat, Tindakan)\",\n"
         "      \"text\": \"Tindakan konkret lainnya yang berbeda dari rekomendasi 1.\"\n"
         "    },\n"
         "    {\n"
+        "      \"category\": \"kategori rekomendasi (pilih salah satu dari: academic, health, lifestyle, sleep, social, mindfulness)\",\n"
+        "      \"priority_level\": \"tingkat prioritas (pilih salah satu dari: low, medium, high, urgent)\",\n"
         "      \"title\": \"Judul Rekomendasi 3 (Singkat, Tindakan)\",\n"
         "      \"text\": \"Tindakan konkret lainnya yang berbeda dari rekomendasi 1 & 2.\"\n"
         "    }\n"
@@ -651,7 +659,7 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
         "2. Jumlah INSIGHT harus TEPAT 1.\n"
         "3. Jumlah REKOMENDASI harus TEPAT 3.\n"
         "4. Gunakan Bahasa Indonesia yang ramah, memotivasi, dan tidak kaku (gunakan sebutan 'kamu').\n"
-        "5. HINDARI REDUNDANSI/PENGULANGAN antara isi insight dengan ketiga rekomendasi. Setiap rekomendasi harus membahas aspek yang berbeda (misalnya: 1 tentang tidur/istirahat, 1 tentang akademik/studi, 1 tentang digital/screen time).\n"
+        "5. HINDARI REDUNDANSI/PENGULANGAN antara isi insight dengan ketiga rekomendasi. Setiap rekomendasi harus membahas aspek yang berbeda.\n"
         "6. JANGAN berikan penjelasan teks tambahan di luar JSON tersebut."
     )
 
@@ -691,14 +699,29 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
         recommendations_data = result_json["recommendations"]
         
         recommendations_items = []
+        valid_categories = {"academic", "health", "lifestyle", "sleep", "social", "mindfulness"}
+        valid_priorities = {"low", "medium", "high", "urgent"}
+        
         for item in recommendations_data[:3]:
+            cat = str(item.get("category", "lifestyle")).lower().strip()
+            if cat not in valid_categories:
+                cat = "lifestyle"
+                
+            priority = str(item.get("priority_level", "medium")).lower().strip()
+            if priority not in valid_priorities:
+                priority = "medium"
+
             recommendations_items.append(RAGTextItem(
+                category=cat,
+                priority_level=priority,
                 title=item.get("title", "Rekomendasi Tindakan"),
                 text=item.get("text", "Lakukan aktivitas yang seimbang.")
             ))
             
         while len(recommendations_items) < 3:
             recommendations_items.append(RAGTextItem(
+                category="lifestyle",
+                priority_level="medium",
                 title="Jaga Keseimbangan",
                 text="Luangkan waktu 15 menit untuk relaksasi atau aktivitas tanpa layar."
             ))
