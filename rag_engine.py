@@ -13,10 +13,10 @@ This module handles:
 import os
 from typing import List, Optional
 import fitz  # PyMuPDF
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

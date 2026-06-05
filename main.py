@@ -4,7 +4,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # Hide TensorFlow warnings in terminal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 import pickle
 import pandas as pd
@@ -35,7 +35,6 @@ else:
 
 # Initialize RAG engine (set to None; loaded at startup)
 rag_engine = None
-
 
 # ============================================================
 # Custom TensorFlow Model Layers & Loss Classes
@@ -198,15 +197,11 @@ class UserInput(BaseModel):
     physical_activity_minutes: int
     study_hours: float
     screen_time_hours: float
+    social_media_hours: float
     assignment_load: int
     deadline_pressure: int
     fatigue_level: int
     mood_score: int
-    social_media_ratio: float
-    study_screen_balance: float
-    academic_pressure_index: float
-    recovery_index: float
-    digital_pressure_index: float
 
 # Recommendation / Insight Shared Schemas
 class InputFeatures(BaseModel):
@@ -229,18 +224,18 @@ class InputFeatures(BaseModel):
 
 # Recommendation Schemas
 class RecommendationRequest(BaseModel):
-    user_id: int
-    stress_prediction_id: int
+    user_id: Union[str, int]
+    stress_prediction_id: Union[str, int]
     stress_level: str                   # "low" | "medium" | "high"
     input_features: InputFeatures
     period_type: str = "daily"          # "daily" | "weekly"
-    weekly_summary_id: Optional[int] = None
+    weekly_summary_id: Optional[Union[str, int]] = None
     max_recommendations: int = 3
 
 class RecommendationItem(BaseModel):
-    user_id: int
-    stress_prediction_id: int
-    weekly_summary_id: Optional[int]
+    user_id: Union[str, int]
+    stress_prediction_id: Union[str, int]
+    weekly_summary_id: Optional[Union[str, int]]
     period_type: str
     category: str
     title: str
@@ -255,19 +250,19 @@ class RecommendationResponse(BaseModel):
 
 # Insight Schemas
 class InsightRequest(BaseModel):
-    user_id: int
-    stress_prediction_id: int
+    user_id: Union[str, int]
+    stress_prediction_id: Union[str, int]
     stress_level: str                       # "low" | "medium" | "high"
     input_features: InputFeatures
     period_type: str = "daily"             # "daily" | "weekly"
-    weekly_summary_id: Optional[int] = None
+    weekly_summary_id: Optional[Union[str, int]] = None
     weekly_stress_levels: Optional[List[str]] = None  # Required if period_type is "weekly"
 
 class InsightResponse(BaseModel):
     success: bool
-    user_id: int
-    stress_prediction_id: int
-    weekly_summary_id: Optional[int]
+    user_id: Union[str, int]
+    stress_prediction_id: Union[str, int]
+    weekly_summary_id: Optional[Union[str, int]]
     period_type: str
     insight_text: str
     created_at: str
@@ -296,7 +291,7 @@ class DailyHistoryItem(BaseModel):
     stress_level: Optional[str] = None
 
 class WeeklyRAGRequest(BaseModel):
-    user_id: int
+    user_id: Union[str, int]
     weekly_stress_prediction: str
     history: List[DailyHistoryItem]
 
@@ -308,11 +303,9 @@ class RAGTextItem(BaseModel):
 
 class WeeklyRAGResponse(BaseModel):
     success: bool
-    user_id: int
+    user_id: Union[str, int]
     insight: str
     recommendations: List[RAGTextItem]
-
-
 
 # ============================================================
 # Helper Functions
@@ -322,8 +315,7 @@ def detect_categories(feats: dict, stress_level: str, period_type: str) -> list:
     sl = stress_level.lower()
 
     if period_type == "weekly":
-        if sl in ("medium", "high"):
-            relevant.append("weekly_target")
+        relevant.append("weekly_target")
         return relevant
 
     if sl == "low":
@@ -482,7 +474,7 @@ def root():
     return {
         "service": "CekTenang Unified ML Service",
         "status": "running",
-        "endpoints": ["/predict", "/recommendations", "/insights", "/weekly-rag", "/health"]
+        "endpoints": ["/predict", "/recommendations", "/insights", "/health"]
     }
 
 @app.get("/health")
@@ -492,8 +484,7 @@ def health():
         "services": {
             "prediction": model is not None,
             "recommendation": rec_kb is not None,
-            "insight": insight_daily_tmpl is not None,
-            "rag_vectorstore": rag_engine is not None
+            "insight": insight_daily_tmpl is not None
         },
         "versions": {
             "recommendation_kb": rec_version,
@@ -508,6 +499,17 @@ def predict_stress(data: UserInput):
 
     try:
         input_dict = data.model_dump() if hasattr(data, 'model_dump') else data.dict()
+        
+        # Calculate derived features using the new formulas
+        screen_time = input_dict['screen_time_hours']
+        social_media = input_dict['social_media_hours']
+        
+        input_dict['social_media_ratio'] = (social_media / screen_time) if screen_time > 0 else 0.0
+        input_dict['study_screen_balance'] = input_dict['study_hours'] / (screen_time + 1.0)
+        input_dict['academic_pressure_index'] = (input_dict['assignment_load'] + input_dict['deadline_pressure']) / 2.0
+        input_dict['recovery_index'] = (input_dict['sleep_hours'] * input_dict['mood_score']) / (input_dict['fatigue_level'] + 1.0)
+        input_dict['digital_pressure_index'] = screen_time + social_media
+        
         input_df = pd.DataFrame([input_dict])[FEATURE_COLS]
         
         # Standardize input features
@@ -611,7 +613,7 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
     if not groq_client:
         raise HTTPException(status_code=500, detail="Groq API client is not configured. Please set GROQ_API_KEY.")
 
-    # 1. Structure student data context
+    # 1. Structure RAG context
     history_summary = []
     for idx, day in enumerate(req.history):
         day_info = f"Day {idx+1} ({day.activity_date or 'N/A'}): "
@@ -642,7 +644,7 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
         
     history_context = "\n".join(history_summary)
 
-    # 2. RAG: Retrieve scientific evidence from journal papers
+# 2. RAG: Retrieve scientific evidence from journal papers
     rag_context = ""
     if rag_engine is not None:
         try:
@@ -660,7 +662,8 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
     else:
         print("[RAG] Engine not available, proceeding without scientific evidence.")
 
-    # 3. System instruction (rules only)
+
+   # 3. System instruction (rules only)
     system_instruction = (
         "Anda adalah asisten AI psikolog dan coach gaya hidup mahasiswa yang empati, profesional, dan solutif.\n"
         "Tugas Anda adalah menganalisis data aktivitas mingguan mahasiswa untuk mendeteksi tren stres, kesehatan, dan produktivitas mereka.\n\n"
@@ -708,18 +711,16 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
             "- Jangan membuat klaim ilmiah baru yang tidak didukung konteks.\n"
             "- Sebutkan temuan ilmiah secara natural dalam teks (tanpa format sitasi formal)."
         )
-
+        
     user_prompt = (
         f"Analisis data historis seminggu berikut untuk User ID: {req.user_id}.\n\n"
-        f"STUDENT DATA:\n"
         f"Prediksi Tingkat Stres Mingguan: {req.weekly_stress_prediction}\n\n"
         f"Data Historis Harian:\n"
-        f"{history_context}"
-        f"{evidence_section}\n\n"
-        "Kembalikan respon dalam format JSON sesuai spesifikasi di instruksi sistem."
+        f"{history_context}\n\n"
+        "Ingat, kembalikan respon dalam format JSON sesuai spesifikasi di instruksi sistem."
     )
 
-    # 5. Call Groq API
+    # 3. Call Groq API
     try:
         response = groq_client.chat.completions.create(
             model="openai/gpt-oss-20b",
@@ -729,7 +730,7 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
             ],
             response_format={"type": "json_object"},
             temperature=0.7,
-            max_tokens=800
+            max_tokens=1000
         )
         
         raw_content = response.choices[0].message.content
@@ -786,4 +787,3 @@ def generate_weekly_rag(req: WeeklyRAGRequest):
             status_code=500,
             detail=f"Gagal menghasilkan RAG AI insight/rekomendasi: {str(e)}"
         )
-
